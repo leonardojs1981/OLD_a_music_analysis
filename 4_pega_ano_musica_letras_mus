@@ -1,0 +1,99 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Created on Sat Jun  3 10:58:55 2017
+
+@author: leonardosales
+"""
+
+### 0. Pacotes ###
+import urllib.request as urllib  # copia paginas html
+from bs4 import BeautifulSoup  # functions to parse the data returned from the website
+import re
+import pandas as pd
+import numpy as np
+from unidecode import unidecode
+import math
+
+
+
+### 1. Criando Funções ###
+# 1.1. Recebe lista de artistas e retorna lista de albuns, com informação de ano e link.
+#artista = "raimundos"
+def gera_lista_albuns (artista):
+    artista_page = ("https://www.letras.mus.br/" + artista + "/discografia/")
+    file = "artista.txt"
+    urllib.urlretrieve(artista_page, file)
+    line_number = 0
+    for line in open(file, encoding="ISO-8859-1"):
+        line_number += 1
+        if line_number == 13:
+            linha_discografia = line
+    soup = BeautifulSoup(linha_discografia)
+    lista = soup.script
+    lista_str = str(lista)
+    lista_str = lista_str.replace("album\":[","¬").replace("]","¬").replace("{\"@context\"","|{a")
+    lista_albuns = lista_str.split("¬")[1].split("|")
+    lista_links_albuns = []
+    lista_anos_albuns = []
+    for i in range (1,len(lista_albuns)):
+        lista_links_albuns.append(lista_albuns[i].replace("\"@id\":\"","¬").replace("\",\"@type\"","¬").split("¬")[1])
+        lista_anos_albuns.append(lista_albuns[i].replace("\"@id\":\"","¬").replace("\",\"@type\"","¬").split("¬")[1][-5:-1])
+    return (artista, lista_links_albuns, lista_anos_albuns)
+
+#lista_links_albuns[0][-5:-1]
+
+
+# 1.2. Recebe lista de links de álbuns e retorna lista de músicas para cada álbum
+#artista = "raimundos"
+#lista_raimundos = lista_links_albuns
+#album_page = lista_raimundos[0]
+
+def gera_lista_musicas (artista, album_page):
+    file = "album.txt"
+    urllib.urlretrieve(album_page, file)
+    line_number = 0
+    for line in open(file, encoding="UTF-8"):
+        line_number += 1
+        if line_number == 13:
+            linha_musicas = line
+    soup = BeautifulSoup(linha_musicas)
+    lista = soup.script
+    lista_str = str(lista)
+    lista_musicas = lista_str.replace("track\":[","¬").split("¬")[1].replace("]","¬").split("¬")[0].replace("{\"@id\"","|{a").split("|")
+    lista_links_musicas = []
+    for i in range (1,len(lista_musicas)):
+            lista_links_musicas.append(lista_musicas[i].replace("\"name\":\"","¬").replace("\",\"url\":","¬").split("¬")[1])
+    return (artista, album_page, lista_links_musicas)
+
+# 1.3. Funcao para padronizar nome da musica
+def padroniza_nome_musica(x):
+    y = unidecode(x).replace(",","").replace("?","").replace("!","").replace(".","").replace(" ","-").replace("/","").replace("\(","").replace("\)","").lower()
+    return y
+
+### 2. Scrapping ###
+# 2.1. Lista de albuns, com ano e link
+lista_artistas_tempo = df_analise_artista_resumo["artista"].tolist() + ["fabio-jr", "claudinho-e-buchecha", "sandy-e-junior", "gabriel-o-pensador", "armandinho", "chitaozinho-e-xororo"]
+
+lista_albuns_tempo = []
+for i in range(0,len(lista_artistas_tempo)):
+    try:
+        lista_albuns_tempo.append(gera_lista_albuns(lista_artistas_tempo[i]))
+        print (i)
+    except:
+        pass
+    
+# 2.2. Lista de músicas do album
+lista_musicas_tempo = []
+for i in range(0,len(lista_albuns_tempo)):
+    try:
+        for j in range(0,len(lista_albuns_tempo[i][1])):
+            try:
+                lista_musicas_album = gera_lista_musicas(lista_albuns_tempo[i][0], lista_albuns_tempo[i][1][j])
+                lista_musicas_tempo.append(lista_musicas_album)
+            except:
+                pass
+        print(i)
+    except:
+        pass
+
