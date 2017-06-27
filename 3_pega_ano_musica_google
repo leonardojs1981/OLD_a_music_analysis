@@ -1,0 +1,348 @@
+#code by Fernando Sola Pereira
+
+from selenium import webdriver
+from selenium.webdriver.common.keys import Keys
+from selenium.webdriver.firefox.firefox_binary import FirefoxBinary
+from selenium.webdriver.common.desired_capabilities import DesiredCapabilities
+
+import re
+import os
+import pickle
+
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.common.action_chains import ActionChains
+
+import pandas as pd
+from collections import defaultdict
+
+from bs4 import BeautifulSoup
+
+
+class ScrapParsingException(Exception):
+    def __init__(self, msg):
+        super(ScrapParsingException, self).__init__(msg)
+
+
+def handle_hideme(driver):
+    elem = driver.find_element_by_link_text('options')
+    ActionChains(driver).click(elem).perform()
+
+    elem = driver.find_element_by_id('stripJS')
+    ActionChains(driver).click(elem).perform()
+
+    elem = driver.find_element_by_id('encodeURL')
+    ActionChains(driver).click(elem).perform()
+
+    return driver.find_element_by_id("input")
+
+
+class Bot:
+
+    proxies = [
+        ('http://hideme.be/', handle_hideme),
+        ('http://server7.kproxy.com/', lambda driver: driver.find_element_by_id("maintextfield")),
+    ]
+
+
+    def __init__(self, use_proxy=False):
+        self.__setup_driver()
+        self.current_proxy_idx = 0
+        self.use_proxy = use_proxy
+
+    def __del__(self):
+        self.driver.close()
+        pass
+
+    def get_proxy(self):
+        current = self.current_proxy_idx
+
+        self.current_proxy_idx += 1
+        if self.current_proxy_idx >= len(self.proxies):
+            self.current_proxy_idx = 0
+
+        return self.proxies[current]
+
+    def __setup_driver(self):
+        os.environ["PATH"] += os.pathsep + '/opt'
+
+        # binary = FirefoxBinary('/usr/bin/firefox')
+        # firefox_capabilities = DesiredCapabilities.FIREFOX
+        # firefox_capabilities['marionette'] = True
+        # firefox_capabilities['firefox_binary'] = '/usr/bin/firefox'
+        # driver = webdriver.Firefox(capabilities=firefox_capabilities, executable_path=r'/opt/geckodriver')
+
+        # binary = FirefoxBinary('/usr/bin/firefox')
+        capabilities = DesiredCapabilities.OPERA
+        capabilities['binary'] = '/usr/bin/opera'
+        print(capabilities)
+
+        options = webdriver.ChromeOptions()
+        options.binary_location = "/usr/bin/opera"
+
+        self.driver = webdriver.Opera(executable_path='/opt/operadriver', desired_capabilities=capabilities, opera_options=options)
+
+    def navegar(self, url, query, handler=None):
+        if self.use_proxy:
+            proxy_tuple = self.get_proxy()
+            self.driver.get(proxy_tuple[0])
+            elem = proxy_tuple[1](self.driver)
+            elem.clear()
+            elem.send_keys(url)
+            elem.send_keys(Keys.RETURN)
+        else:
+            self.driver.get(url)
+        return handler(driver=self.driver, url=url, query=query)
+
+
+def tratar_retorno_google(driver, url, query):
+    retorno = {}
+
+    try:
+        elem = WebDriverWait(driver, 3).until(
+            EC.presence_of_element_located((By.ID, "lst-ib"))
+        )
+    finally:
+        pass
+
+    # elem = driver.find_element_by_id("lst-ib")
+    elem.clear()
+    elem.send_keys(query)
+    elem.send_keys(Keys.RETURN)
+
+    # #uid_0 > div._OKe > div:nth-child(2) > div._G1d._wle._xle > div > div:nth-child(4) > div > div > span._Xbe.kno-fv > a
+    # #uid_0 > div._OKe > div:nth-child(2) > div._G1d._wle._xle > div > div:nth-child(4) > div > div > span._Xbe.kno-fv
+    # driver.find_element_by_css_selector('div._mr.kno-fb-ctx')
+    # driver.find_element_by_xpath('//*[@id="uid_0"]/div[1]/div[2]/div[2]/div/div[5]')
+    # driver.find_element_by_xpath('//*[@id="uid_0"]/div[1]/div[2]/div[2]/div')
+
+    elem = None
+    try:
+        # //*[@id="ires"]/ol/div[1]/div/div[5]/span[2]
+        # //*[@id="uid_0"]/div[1]/div[2]/div[2]/div/div[5]/div/div/span[2]
+        # #uid_0 > div._OKe > div:nth-child(2) > div._G1d._wle._xle > div > div:nth-child(4) > div > div > span._Xbe.kno-fv
+        #//*[@id="uid_0"]/div[1]/div[2]/div[2]/div
+        elem = WebDriverWait(driver, 1).until(
+            EC.presence_of_element_located(
+                (By.XPATH, '//*[@id="uid_0"]'))
+        )
+    finally:
+        if elem is not None:
+            texto = driver.page_source
+            soup = BeautifulSoup(texto, "html5lib")
+
+            # texto = texto.replace('\r','').replace('\n', '||')
+            # texto = soup.find_all('span')
+
+            try:
+                retorno['ano_lancamento'] = list(soup.find_all('div', attrs={'data-attrid': 'kc:/music/recording_cluster:release date'})[0].children)[1].text
+            except:
+                retorno['ano_lancamento'] = ''
+
+            try:
+                retorno['album'] = list(soup.find_all('div', attrs={'data-attrid': 'kc:/music/recording_cluster:first album'})[0].children)[1].text
+            except:
+                retorno['album'] = ''
+
+            try:
+                retorno['artista'] = list(soup.find_all('div', attrs={'data-attrid': 'kc:/music/recording_cluster:artist'})[0].children)[1].text
+            except:
+                retorno['artista'] = ''
+
+            try:
+                retorno['generos'] = list(soup.find_all('div', attrs={'data-attrid': 'kc:/music/recording_cluster:skos_genre'})[0].children)[1].text
+            except:
+                retorno['generos'] = ''
+
+
+            # kc:/music/recording_cluster:skos_genre
+            # kc:/music/recording_cluster:artist
+            # kc:/music/recording_cluster:first album
+            # artista = re.findall(r'''Artista: ([ \w\d\b,'-]+)\|\|''', texto, re.IGNORECASE)
+            # if type(artista) == list and len(artista) > 0:
+            #     retorno['artista'] = artista[0]
+            # else:
+            #     retorno['artista'] = ''
+
+            # album = re.findall(r'''Álbum: ([ \w\d\b,'-]+)||''', texto, re.IGNORECASE)
+            # if type(album) == list and len(album) > 0:
+            #     retorno['album'] = album[0]
+            # else:
+            #     retorno['album'] = ''
+
+            # ano_lancamento = re.findall(r'''Data de lançamento: ([ \w\d\b,'-]+)||''', texto, re.IGNORECASE)
+            # if type(ano_lancamento) == list and len(ano_lancamento) > 0:
+            #     retorno['ano_lancamento'] = ano_lancamento[0]
+            # else:
+            #     retorno['ano_lancamento'] = ''
+
+            # generos = re.findall(r'''Gêneros: ([ \w\d\b,\'-]+)||''', texto, re.IGNORECASE)
+            # if type(generos) == list and len(generos) > 0:
+            #     retorno['generos'] = generos[0]
+            # else:
+            #     retorno['generos'] = ''
+
+        else:
+            raise ScrapParsingException('Não foi possível encontrar os campos na url {}'.format(url))
+
+
+    return retorno
+
+
+def ler_excel_cifras_ano():
+    with open('cifras_ano.xlsx', 'rb') as arq:
+        df = pd.read_excel(arq)
+        df['album_2'] = ''
+        df['generos_2'] = ''
+        df['ano_lancamento_2'] = ''
+        df['tentativas'] = 0
+    return df
+
+
+def ler_excel_letras_ano():
+    with open('letras_ano.xlsx', 'rb') as arq:
+        df = pd.read_excel(arq)
+        df['album_2'] = ''
+        df['generos_2'] = ''
+        df['ano_lancamento_2'] = ''
+        df['tentativas'] = 0
+    return df
+
+
+def processar_cifras_ano():
+    resultado_tmp = 'resultado_tmp_cifras_ano.pickle'
+    df = pd.read_pickle(resultado_tmp)
+
+    bot = Bot(use_proxy=False)
+    try:
+
+        for idx, row in df.iterrows():
+
+            if row['ano_lancamento_2'] != '':
+                continue
+
+            # print(row)
+            # print(row['artista_2'])
+            # print(row['nome_musica_2'])
+            retorno = defaultdict(lambda: '')
+            try:
+                retorno = bot.navegar(
+                    url='http://www.google.com.br',
+                    query=row['artista_2'] + ' ' + row['nome_musica_2'],
+                    handler=tratar_retorno_google)
+            except:
+                pass
+
+            try:
+                df['album_2'][idx] = retorno['album']
+                df['generos_2'][idx] = retorno['generos']
+                df['ano_lancamento_2'][idx] = retorno['ano_lancamento']
+                df['tentativas'][idx] = df['tentativas'][idx] + 1
+
+                if retorno['ano_lancamento'] != '':
+                    with open(resultado_tmp, 'wb') as arq_pck:
+                        pickle.dump(df, arq_pck)
+
+                print('Artista: {:20.20s}, Musica: {:20.20s}, Ano: {:4s}'.format(
+                    row['artista_2'],
+                    row['nome_musica_2'],
+                    retorno['ano_lancamento'],)
+                )
+            except Exception as e:
+                # print(str(e))
+                pass
+
+    except Exception as e:
+        print(e)
+
+
+def processar_letras_ano():
+    resultado_tmp = 'resultado_tmp_letras_ano.pickle'
+    df = pd.read_pickle(resultado_tmp)
+
+    bot = Bot(use_proxy=False)
+    try:
+
+        for idx, row in df.iterrows():
+
+            if row['ano_lancamento_2'] != '':
+                continue
+
+            # print(row)
+            # print(row['artista_2'])
+            # print(row['nome_musica_2'])
+            retorno = defaultdict(lambda: '')
+            try:
+                retorno = bot.navegar(
+                    url='http://www.google.com.br',
+                    query=row['artista_2'] + ' ' + row['nome_musica_4'],
+                    handler=tratar_retorno_google)
+            except:
+                pass
+
+            try:
+                df['album_2'][idx] = retorno['album']
+                df['generos_2'][idx] = retorno['generos']
+                df['ano_lancamento_2'][idx] = retorno['ano_lancamento']
+                df['tentativas'][idx] = df['tentativas'][idx] + 1
+
+                if retorno['ano_lancamento'] != '':
+                    with open(resultado_tmp, 'wb') as arq_pck:
+                        pickle.dump(df, arq_pck)
+
+                print('Artista: {:20.20s}, Musica: {:20.20s}, Ano: {:4s}'.format(
+                    row['artista_2'],
+                    row['nome_musica_4'],
+                    retorno['ano_lancamento'],)
+                )
+            except Exception as e:
+                # print(str(e))
+                pass
+
+    except Exception as e:
+        print(e)
+
+
+if __name__ == "__main__":
+
+    '''
+    processar cifras ano
+    '''
+    # processar_cifras_ano()
+
+    '''
+    cifras ano
+    ler temporario e salvar em excel
+    '''
+    # df = pd.read_pickle('resultado_tmp_cifras_ano.pickle')
+    # df.to_excel('resultado_cifras_ano.xlsx')
+    # print(df.head())
+
+
+
+    #####################
+    # LETRAS ANO
+    #####################
+
+    '''
+    Criar colunas de controle e pickle
+    '''
+    # df = ler_excel_letras_ano()
+    # resultado_tmp = 'resultado_tmp_letras_ano.pickle'
+    # with open(resultado_tmp, 'wb') as arq_pck:
+    #     pickle.dump(df, arq_pck)
+
+    '''
+    processar letras ano
+    '''
+    processar_letras_ano()
+
+    '''
+    letras ano
+    ler temporario e salvar em excel
+    '''
+    # df = pd.read_pickle('resultado_tmp_letras_ano.pickle')
+    # df.to_excel('resultado_letras_ano.xlsx')
+    # print(df.head())
+
